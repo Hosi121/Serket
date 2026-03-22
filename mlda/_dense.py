@@ -83,14 +83,12 @@ def _compute_doc_topic_and_phi(matrices, effective_theta, phi_mw, update_phi):
             next_phi.append(None)
             continue
 
-        scores = effective_theta[:, :, None] * phi[None, :, :]
-        denom = np.clip(scores.sum(axis=1), EPS, None)
-        responsibilities = scores / denom[:, None, :]
-        weighted = responsibilities * matrix[:, None, :]
-
-        doc_topic += weighted.sum(axis=2)
+        denom = np.clip(effective_theta.dot(phi), EPS, None)
+        scaled = matrix / denom
+        doc_topic += effective_theta * scaled.dot(phi.T)
         if update_phi:
-            next_phi.append(normalize_rows(weighted.sum(axis=0) + BETA))
+            topic_word = phi * effective_theta.T.dot(scaled)
+            next_phi.append(normalize_rows(topic_word + BETA))
         else:
             next_phi.append(phi)
 

@@ -1,37 +1,27 @@
-import numpy as np
-
 from . import _dense
 from . import _legacy
-from ._common import calc_acc, prepare_modalities
+from ._common import calc_acc, load_model_payload
 
 
-def _active_modalities(data):
-    matrices, _, _ = prepare_modalities(data)
-    return sum(1 for matrix in matrices if matrix is not None)
+def _backend_from_saved_model(load_dir):
+    payload = load_model_payload(load_dir)
+    if isinstance(payload, dict):
+        backend = payload.get("backend")
+        if backend in ("dense_em", "legacy_gibbs"):
+            return backend
+    if isinstance(payload, (list, tuple)) and len(payload) == 2:
+        return "legacy_gibbs"
+    return "dense_em"
 
 
-def _total_mass(data):
-    matrices, _, _ = prepare_modalities(data)
-    total = 0
-    for matrix in matrices:
-        if matrix is not None:
-            total += int(np.asarray(matrix).sum())
-    return total
-
-
-def choose_backend(data, K, backend="auto"):
+def choose_backend(data, K, backend="auto", load_dir=None):
     if backend != "auto":
         return backend
 
-    if K > 100:
-        return "dense_em"
-    if _active_modalities(data) > 1:
-        return "dense_em"
-    if not _legacy.NUMBA_AVAILABLE:
-        return "dense_em"
-    if _total_mass(data) > 20000:
-        return "dense_em"
-    return "legacy_gibbs"
+    if load_dir is not None:
+        return _backend_from_saved_model(load_dir)
+
+    return "dense_em"
 
 
 def train(
@@ -46,7 +36,7 @@ def train(
     num_restarts=None,
     random_state=None,
 ):
-    backend = choose_backend(data, K, backend=backend)
+    backend = choose_backend(data, K, backend=backend, load_dir=load_dir)
 
     if backend == "dense_em":
         if num_restarts is None:
