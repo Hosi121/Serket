@@ -1,4 +1,5 @@
 import random
+import math
 
 import numpy as np
 
@@ -25,7 +26,6 @@ except ImportError:
 @njit(cache=True)
 def _sample_topic(doc_index, word_index, n_dz, n_zw, n_z, vocab_size, bias_row):
     num_topics = n_dz.shape[1]
-    cumulative = np.empty(num_topics, dtype=np.float64)
     total = 0.0
 
     for topic in range(num_topics):
@@ -35,11 +35,17 @@ def _sample_topic(doc_index, word_index, n_dz, n_zw, n_z, vocab_size, bias_row):
             / (n_z[topic] + vocab_size * BETA)
             * bias_row[topic]
         )
-        cumulative[topic] = total
 
     threshold = total * np.random.random()
+    cumulative = 0.0
     for topic in range(num_topics):
-        if cumulative[topic] >= threshold:
+        cumulative += (
+            (n_dz[doc_index, topic] + ALPHA)
+            * (n_zw[topic, word_index] + BETA)
+            / (n_z[topic] + vocab_size * BETA)
+            * bias_row[topic]
+        )
+        if cumulative >= threshold:
             return topic
 
     return num_topics - 1
@@ -55,6 +61,11 @@ def _init_counts(doc_offsets, words, topics, n_dz, n_zw, n_z):
             n_dz[doc_index, topic] += 1
             n_zw[topic, word_index] += 1
             n_z[topic] += 1
+
+
+@njit(cache=True)
+def _seed_numba(seed):
+    np.random.seed(seed)
 
 
 @njit(cache=True)
@@ -86,15 +97,34 @@ def conv_to_word_list(data):
     return np.repeat(np.arange(len(counts), dtype=np.int32), counts)
 
 
+@njit(cache=True)
 def calc_liklihood(data, n_dz, n_zw, n_z, num_topics, vocab_size):
     likelihood = 0.0
+    num_docs = data.shape[0]
+    topic_denom = np.empty(num_topics, dtype=np.float64)
+    for topic in range(num_topics):
+        topic_denom[topic] = n_z[topic] + vocab_size * BETA
 
-    P_wz = (n_zw.T + BETA) / (n_z + vocab_size * BETA)
-    for doc_index in range(len(data)):
-        Pz = (n_dz[doc_index] + ALPHA) / (np.sum(n_dz[doc_index]) + num_topics * ALPHA)
-        Pwz = Pz * P_wz
-        Pw = np.sum(Pwz, axis=1) + 1e-6
-        likelihood += float(np.sum(data[doc_index] * np.log(Pw)))
+    for doc_index in range(num_docs):
+        doc_total = 0.0
+        for topic in range(num_topics):
+            doc_total += n_dz[doc_index, topic]
+        doc_denom = doc_total + num_topics * ALPHA
+
+        for word_index in range(vocab_size):
+            count = data[doc_index, word_index]
+            if count == 0:
+                continue
+
+            prob = 0.0
+            for topic in range(num_topics):
+                prob += (
+                    (n_dz[doc_index, topic] + ALPHA)
+                    / doc_denom
+                    * (n_zw[topic, word_index] + BETA)
+                    / topic_denom[topic]
+                )
+            likelihood += count * math.log(prob + 1e-6)
 
     return likelihood
 
@@ -169,6 +199,7 @@ def train(
     if random_state is not None:
         np.random.seed(random_state)
         random.seed(random_state)
+        _seed_numba(random_state)
 
     token_state = []
     n_dz = np.zeros((num_docs, K), dtype=np.int64)
