@@ -25,7 +25,7 @@ def preprocess_modalities(paths, weights):
     return matrices
 
 
-def evaluate_task(name, paths, weights, categories, K, backend, seeds, num_itr, num_restarts):
+def evaluate_task(name, paths, weights, categories, K, backend, seeds, num_itr, num_restarts, init_method):
     data = preprocess_modalities(paths, weights)
     bias = np.ones((len(categories), K), dtype=np.float64) / K
     accs = []
@@ -44,6 +44,7 @@ def evaluate_task(name, paths, weights, categories, K, backend, seeds, num_itr, 
                 backend=backend,
                 num_restarts=num_restarts,
                 random_state=seed,
+                init_method=init_method,
             )
             times.append(time.perf_counter() - start)
             acc, _ = mlda.calc_acc(np.argmax(Pdz, axis=-1), categories)
@@ -52,6 +53,7 @@ def evaluate_task(name, paths, weights, categories, K, backend, seeds, num_itr, 
     return {
         "task": name,
         "backend": backend,
+        "init_method": init_method,
         "mean_time": float(np.mean(times)),
         "mean_acc": float(np.mean(accs)),
         "best_acc": float(np.max(accs)),
@@ -72,6 +74,7 @@ def main():
     parser.add_argument("--seeds", type=int, default=10)
     parser.add_argument("--iters", type=int, default=100)
     parser.add_argument("--restarts", type=int, default=4)
+    parser.add_argument("--init-method", choices=("auto", "native", "fastkmeans"), default="auto")
     args = parser.parse_args()
 
     backends = args.backends or ["legacy_gibbs", "dense_em", "auto"]
@@ -110,9 +113,10 @@ def main():
                 args.seeds,
                 args.iters,
                 args.restarts,
+                args.init_method,
             )
             print(
-                "{task} {backend} mean_acc={mean_acc:.3f} best={best_acc:.3f} "
+                "{task} {backend} init={init_method} mean_acc={mean_acc:.3f} best={best_acc:.3f} "
                 "worst={worst_acc:.3f} mean_time={mean_time:.3f}s".format(**result)
             )
 

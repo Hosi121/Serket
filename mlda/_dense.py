@@ -6,6 +6,16 @@ from ._common import ALPHA, BETA, EPS, dense_payload, load_model_payload
 from ._common import normalize_bias, normalize_rows, phi_from_payload, prepare_modalities
 from ._common import save_model_payload, save_outputs
 
+try:
+    import torch
+    from fastkmeans import FastKMeans
+
+    FASTKMEANS_AVAILABLE = True
+except ImportError:
+    torch = None
+    FastKMeans = None
+    FASTKMEANS_AVAILABLE = False
+
 
 def _concat_features(matrices):
     features = []
@@ -47,6 +57,46 @@ def _kmeanspp_init(features, num_topics, rng):
                 centers[topic] = features[int(rng.integers(num_docs))]
 
     return labels
+
+
+def _fastkmeans_init(features, num_topics, rng):
+    if not FASTKMEANS_AVAILABLE:
+        raise RuntimeError("fastkmeans is not installed.")
+
+    seed = int(rng.integers(0, 2**31 - 1))
+    data = np.asarray(features, dtype=np.float32)
+    use_gpu = bool(torch.cuda.is_available())
+
+    def _run(gpu):
+        model = FastKMeans(
+            d=data.shape[1],
+            k=num_topics,
+            niter=25,
+            tol=1e-8,
+            gpu=gpu,
+            seed=seed,
+            max_points_per_centroid=None,
+            verbose=False,
+            use_triton=False,
+        )
+        return model.fit_predict(data).astype(np.int32, copy=False)
+
+    if use_gpu:
+        try:
+            return _run(True)
+        except Exception:
+            pass
+
+    return _run(False)
+
+
+def _choose_init_method(init_method, num_docs, num_topics):
+    if init_method != "auto":
+        return init_method
+
+    if FASTKMEANS_AVAILABLE and num_docs >= 1000 and num_topics >= 16:
+        return "fastkmeans"
+    return "native"
 
 
 def _theta_from_labels(labels, bias):
@@ -97,10 +147,18 @@ def _compute_doc_topic_and_phi(matrices, effective_theta, phi_mw, update_phi):
     return doc_topic, next_phi, lik
 
 
-def _train_chain(matrices, num_topics, num_itr, bias, rng, fixed_phi=None):
+def _train_chain(matrices, num_topics, num_itr, bias, rng, fixed_phi=None, init_method="auto"):
     num_docs = bias.shape[0]
     if fixed_phi is None:
-        labels = _kmeanspp_init(_concat_features(matrices), num_topics, rng)
+        features = _concat_features(matrices)
+        chosen_init = _choose_init_method(init_method, num_docs, num_topics)
+        if chosen_init == "fastkmeans":
+            try:
+                labels = _fastkmeans_init(features, num_topics, rng)
+            except Exception:
+                labels = _kmeanspp_init(features, num_topics, rng)
+        else:
+            labels = _kmeanspp_init(features, num_topics, rng)
         theta = _theta_from_labels(labels, bias)
         phi_mw = _phi_from_labels(matrices, labels, num_topics)
         update_phi = True
@@ -151,6 +209,7 @@ def train(
     load_dir=None,
     num_restarts=4,
     random_state=None,
+    init_method="auto",
 ):
     matrices, dims, num_docs = prepare_modalities(data)
     matrices = [
@@ -172,7 +231,15 @@ def train(
     best = None
     for child_seed in child_seeds:
         rng = np.random.default_rng(child_seed)
-        candidate = _train_chain(matrices, K, num_itr, bias, rng, fixed_phi=fixed_phi)
+        candidate = _train_chain(
+            matrices,
+            K,
+            num_itr,
+            bias,
+            rng,
+            fixed_phi=fixed_phi,
+            init_method=init_method,
+        )
         if best is None or candidate[0] > best[0]:
             best = candidate
 

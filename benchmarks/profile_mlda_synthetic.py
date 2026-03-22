@@ -20,6 +20,7 @@ BREAKDOWN_TARGETS = {
     "dense_em": [
         "_concat_features",
         "_kmeanspp_init",
+        "_fastkmeans_init",
         "_phi_from_labels",
         "_compute_doc_topic_and_phi",
         "save_outputs",
@@ -90,6 +91,7 @@ def main():
     parser.add_argument("--iters", type=int, default=5)
     parser.add_argument("--restarts", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--init-method", choices=("auto", "native", "fastkmeans"), default="auto")
     parser.add_argument("--breakdown", action="store_true")
     args = parser.parse_args()
 
@@ -118,6 +120,7 @@ def main():
                 backend=args.backend,
                 num_restarts=args.restarts,
                 random_state=args.seed,
+                init_method=args.init_method,
             )
             elapsed = time.perf_counter() - start
     finally:
@@ -125,8 +128,9 @@ def main():
             restore_breakdown(module, originals)
 
     print(
-        "backend={} docs={} topics={} dims={} nnz={} elapsed={:.3f}s shape={}".format(
+        "backend={} init={} docs={} topics={} dims={} nnz={} elapsed={:.3f}s shape={}".format(
             args.backend,
+            args.init_method,
             args.docs,
             args.topics,
             args.dims,

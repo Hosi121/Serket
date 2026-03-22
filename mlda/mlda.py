@@ -35,6 +35,7 @@ def train(
     backend="auto",
     num_restarts=None,
     random_state=None,
+    init_method="auto",
 ):
     backend = choose_backend(data, K, backend=backend, load_dir=load_dir)
 
@@ -51,6 +52,7 @@ def train(
             load_dir=load_dir,
             num_restarts=num_restarts,
             random_state=random_state,
+            init_method=init_method,
         )
 
     if backend == "legacy_gibbs":

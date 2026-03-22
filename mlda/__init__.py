@@ -22,6 +22,7 @@ class MLDA(srk.Module):
         backend="auto",
         num_restarts=None,
         random_state=None,
+        init_method="auto",
     ):
         super(MLDA, self).__init__(name, True)
         self.__K = K
@@ -32,6 +33,7 @@ class MLDA(srk.Module):
         self.__backend = backend
         self.__num_restarts = num_restarts
         self.__random_state = random_state
+        self.__init_method = init_method
         self.__n = 0
         
     def update(self, load_trained_model=None):
@@ -83,6 +85,7 @@ class MLDA(srk.Module):
             backend=self.__backend,
             num_restarts=self.__num_restarts,
             random_state=seed,
+            init_method=self.__init_method,
         )
         
         self.__n += 1
